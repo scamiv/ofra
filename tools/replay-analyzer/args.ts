@@ -14,6 +14,9 @@ export function usage(): string {
     "Replay fetching:",
     "  --apiBase <url>            Fetch replay by id from this API (default: https://api.openfront.io).",
     "",
+    "Cross-commit comparison:",
+    "  --compareAgainst <commit>  Compare performance against a different commit (runs replay twice).",
+    "",
     "Profiling:",
     "  --cpuProfile               Write a V8 CPU profile (.cpuprofile) for the replay run.",
     "",
@@ -37,6 +40,7 @@ export function parseArgs(argv: string[]): {
   install: boolean;
   apiBase: string;
   cpuProfile: boolean;
+  compareAgainst: string | null;
 } {
   let replayPath: string | null = null;
   let outPath: string | null = null;
@@ -50,6 +54,7 @@ export function parseArgs(argv: string[]): {
   let install = true;
   let apiBase = "https://api.openfront.io";
   let cpuProfile = false;
+  let compareAgainst: string | null = null;
 
   const args = [...argv];
   while (args.length > 0) {
@@ -93,6 +98,11 @@ export function parseArgs(argv: string[]): {
       cpuProfile = true;
       continue;
     }
+    if (arg === "--compareAgainst") {
+      compareAgainst = args.shift() ?? null;
+      if (!compareAgainst) throw new Error("Missing value for --compareAgainst");
+      continue;
+    }
     if (arg === "--maxTurns") {
       const value = args.shift();
       maxTurns = value ? Number.parseInt(value, 10) : NaN;
@@ -132,5 +142,6 @@ export function parseArgs(argv: string[]): {
     install,
     apiBase,
     cpuProfile,
+    compareAgainst,
   };
 }

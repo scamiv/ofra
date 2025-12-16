@@ -17,6 +17,11 @@ export type OpenFrontRuntime = {
   GameRunner: {
     createGameRunner: (...args: any[]) => any;
   };
+  // Optional internals for state capture (may not exist in old commits)
+  PseudoRandom?: any;
+  createGame?: any;
+  loadTerrainMap?: any;
+  getConfig?: any;
 };
 
 async function importFromGameRoot<T>(gameRoot: string, relPath: string): Promise<T> {
@@ -38,7 +43,10 @@ async function importFirst<T>(gameRoot: string, relPaths: string[]): Promise<T> 
     : new Error(`Failed to import any of: ${relPaths.join(", ")}`);
 }
 
-export async function loadOpenFrontRuntime(gameRoot: string): Promise<OpenFrontRuntime> {
+export async function loadOpenFrontRuntime(
+  gameRoot: string,
+  options?: { enableStateCapture?: boolean }
+): Promise<OpenFrontRuntime> {
   const Schemas = await importFirst<any>(gameRoot, ["src/core/Schemas.ts", "src/core/Schemas.js"]);
   const Game = await importFirst<any>(gameRoot, ["src/core/game/Game.ts", "src/core/game/Game.js"]);
   const GameUpdates = await importFirst<any>(gameRoot, [
@@ -62,6 +70,53 @@ export async function loadOpenFrontRuntime(gameRoot: string): Promise<OpenFrontR
     throw new Error(`OpenFront GameRunner module missing expected exports at ${path.resolve(gameRoot, "src/core/GameRunner")}`);
   }
 
-  return { Schemas, Game, GameUpdates, GameRunner };
+  const runtime: OpenFrontRuntime = { Schemas, Game, GameUpdates, GameRunner };
+
+  // Optionally load internal modules for state capture/injection
+  if (options?.enableStateCapture) {
+    try {
+      // Load PseudoRandom class
+      const PseudoRandomModule = await importFirst<any>(gameRoot, [
+        "src/core/PseudoRandom.ts",
+        "src/core/PseudoRandom.js"
+      ]);
+      if (PseudoRandomModule?.PseudoRandom) {
+        runtime.PseudoRandom = PseudoRandomModule.PseudoRandom;
+      }
+
+      // Load createGame function
+      const GameImplModule = await importFirst<any>(gameRoot, [
+        "src/core/game/GameImpl.ts",
+        "src/core/game/GameImpl.js"
+      ]);
+      if (GameImplModule?.createGame) {
+        runtime.createGame = GameImplModule.createGame;
+      }
+
+      // Load loadTerrainMap function
+      const TerrainMapModule = await importFirst<any>(gameRoot, [
+        "src/core/game/TerrainMapLoader.ts",
+        "src/core/game/TerrainMapLoader.js"
+      ]);
+      if (TerrainMapModule?.loadTerrainMap) {
+        runtime.loadTerrainMap = TerrainMapModule.loadTerrainMap;
+      }
+
+      // Load getConfig function
+      const ConfigModule = await importFirst<any>(gameRoot, [
+        "src/core/configuration/ConfigLoader.ts",
+        "src/core/configuration/ConfigLoader.js"
+      ]);
+      if (ConfigModule?.getConfig) {
+        runtime.getConfig = ConfigModule.getConfig;
+      }
+
+    } catch (err) {
+      // If loading fails (old commit, different structure), just warn - don't fail
+      console.warn("Could not load some state capture modules (this is OK for old commits):", err);
+    }
+  }
+
+  return runtime;
 }
 

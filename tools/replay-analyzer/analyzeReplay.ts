@@ -105,6 +105,7 @@ const {
   install,
   apiBase,
   cpuProfile,
+  compareAgainst,
 } = parseArgs(process.argv.slice(2));
 if (help || !replayPath) {
   console.log(usage());
@@ -122,6 +123,108 @@ const absoluteReplayPath = await resolveReplayInputToPath({
 const replayGitCommit = await extractReplayGitCommit(absoluteReplayPath);
 if (replayGitCommit !== null && !/^[0-9a-f]{40}$/i.test(replayGitCommit)) {
   throw new Error(`Invalid replay gitCommit (expected 40-hex SHA): ${replayGitCommit}`);
+}
+
+// Handle comparison mode
+if (compareAgainst) {
+  if (!replayGitCommit) {
+    throw new Error("Cannot compare commits: replay missing gitCommit. Replay must be recorded with a git commit.");
+  }
+  if (!/^[0-9a-f]{40}$/i.test(compareAgainst)) {
+    throw new Error(`Invalid --compareAgainst commit (expected 40-hex SHA): ${compareAgainst}`);
+  }
+
+  const { compareCommits } = await import("./compareCommits");
+  const { comparisonReportHtml } = await import("./reportHtml");
+
+  const comparison = await compareCommits(
+    absoluteReplayPath,
+    replayGitCommit,
+    compareAgainst,
+    {
+      maxTurns,
+      economySampleEvery,
+      verbose,
+      cpuProfile,
+      repoUrl,
+      cacheDir,
+      install,
+      apiBase,
+      repoRoot,
+    }
+  );
+
+  // Generate comparison report
+  const d3Path = await firstExistingPath([
+    path.join(repoRoot, "node_modules", "d3", "dist", "d3.min.js"),
+    // Use reference commit's d3 since we're already using that checkout
+    path.join(path.dirname(comparison.referenceReport.meta.replayPath), "../../node_modules", "d3", "dist", "d3.min.js"),
+  ]);
+
+  const d3Source = await fs.readFile(d3Path, "utf8");
+  const defaultOutDir = path.join(repoRoot, "replays", "out");
+  await fs.mkdir(defaultOutDir, { recursive: true });
+
+  const replayBase = path.basename(absoluteReplayPath).replace(/[^a-zA-Z0-9_.-]+/g, "_");
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  
+  const refCommitShort = replayGitCommit.substring(0, 8);
+  const cmpCommitShort = compareAgainst.substring(0, 8);
+
+  // Write individual reference report
+  const referenceReportPath = path.join(
+    defaultOutDir,
+    `${replayBase}.${timestamp}.ref-${refCommitShort}.report.html`,
+  );
+  const referenceHtml = reportHtml(d3Source, comparison.referenceReport);
+  await fs.writeFile(referenceReportPath, referenceHtml, "utf8");
+
+  // Write individual comparison report
+  const comparisonReportPath = path.join(
+    defaultOutDir,
+    `${replayBase}.${timestamp}.cmp-${cmpCommitShort}.report.html`,
+  );
+  const comparisonIndividualHtml = reportHtml(d3Source, comparison.comparisonReport);
+  await fs.writeFile(comparisonReportPath, comparisonIndividualHtml, "utf8");
+
+  // Write side-by-side comparison report
+  const comparisonSummaryPath = outPath 
+    ? path.resolve(process.cwd(), outPath) 
+    : path.join(defaultOutDir, `${replayBase}.${timestamp}.comparison.html`);
+  const comparisonSummaryHtml = comparisonReportHtml(d3Source, comparison);
+  await fs.writeFile(comparisonSummaryPath, comparisonSummaryHtml, "utf8");
+
+  process.stderr.write("\n");
+  process.stderr.write("=".repeat(80) + "\n");
+  process.stderr.write("COMPARISON RESULTS\n");
+  process.stderr.write("=".repeat(80) + "\n");
+  process.stderr.write(`Reference  (${refCommitShort}): ${comparison.referenceReport.summary.tickExecutionMs.avg.toFixed(2)}ms avg tick\n`);
+  process.stderr.write(`Comparison (${cmpCommitShort}): ${comparison.comparisonReport.summary.tickExecutionMs.avg.toFixed(2)}ms avg tick\n`);
+  
+  const delta = comparison.comparisonReport.summary.tickExecutionMs.avg - comparison.referenceReport.summary.tickExecutionMs.avg;
+  const deltaPercent = (delta / comparison.referenceReport.summary.tickExecutionMs.avg) * 100;
+  const sign = delta >= 0 ? '+' : '';
+  process.stderr.write(`Delta: ${sign}${delta.toFixed(2)}ms (${sign}${deltaPercent.toFixed(1)}%)\n`);
+  
+  process.stderr.write("\n");
+  process.stderr.write(`Reports generated:\n`);
+  process.stderr.write(`  Reference:  ${referenceReportPath}\n`);
+  process.stderr.write(`  Comparison: ${comparisonReportPath}\n`);
+  process.stderr.write(`  Summary:    ${comparisonSummaryPath}\n`);
+  
+  if (comparison.referenceCpuProfilePath || comparison.comparisonCpuProfilePath) {
+    process.stderr.write(`\n`);
+    process.stderr.write(`CPU Profiles:\n`);
+    if (comparison.referenceCpuProfilePath) {
+      process.stderr.write(`  Reference:  ${comparison.referenceCpuProfilePath}\n`);
+    }
+    if (comparison.comparisonCpuProfilePath) {
+      process.stderr.write(`  Comparison: ${comparison.comparisonCpuProfilePath}\n`);
+    }
+  }
+  process.stderr.write("=".repeat(80) + "\n");
+
+  process.exit(0);
 }
 
 const gameRoot =

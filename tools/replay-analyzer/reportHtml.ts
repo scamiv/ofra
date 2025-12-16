@@ -1,5 +1,203 @@
 import type { ReplayPerfReport } from "./types";
 
+export interface ComparisonReport {
+  referenceReport: ReplayPerfReport;
+  comparisonReport: ReplayPerfReport;
+  referenceCommit: string;
+  comparisonCommit: string;
+  injectionWarnings: string[];
+}
+
+export function comparisonReportHtml(d3Source: string, comparison: ComparisonReport): string {
+  const { referenceReport, comparisonReport, referenceCommit, comparisonCommit, injectionWarnings } = comparison;
+  const safeJson = JSON.stringify(comparison).replace(/</g, "\\u003c");
+  const refCommit = referenceCommit.substring(0, 8);
+  const cmpCommit = comparisonCommit.substring(0, 8);
+  const title = `OpenFront Replay Comparison - ${referenceReport.meta.gameID} (${refCommit} vs ${cmpCommit})`;
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        margin: 0;
+        background: #0b1220;
+        color: #e5e7eb;
+      }
+      header { padding: 18px 22px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+      header h1 { margin: 0 0 6px 0; font-size: 18px; }
+      header .meta { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; opacity: 0.85; }
+      main { padding: 16px 22px 40px; max-width: 1600px; margin: 0 auto; }
+      .comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .report-section { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 12px; }
+      .report-section h3 { margin: 0 0 10px 0; font-size: 14px; text-align: center; }
+      .diff-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+      .diff-table th, .diff-table td { text-align: left; padding: 8px 10px; font-size: 12px; vertical-align: top; }
+      .diff-table th { opacity: 0.85; border-bottom: 1px solid rgba(255,255,255,0.08); }
+      .diff-positive { color: #ef4444; }
+      .diff-negative { color: #10b981; }
+      .diff-neutral { color: #6b7280; }
+      .warnings { background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.2); border-radius: 8px; padding: 10px; margin: 10px 0; }
+      .warnings h4 { margin: 0 0 8px 0; color: #fbbf24; }
+      .warnings ul { margin: 0; padding-left: 20px; }
+      .warnings li { margin: 2px 0; }
+      .chart { width: 100%; height: 200px; }
+      .axis path, .axis line { stroke: rgba(255,255,255,0.18); }
+      .axis text { fill: rgba(229,231,235,0.8); font-size: 10px; }
+      .gridline line { stroke: rgba(255,255,255,0.06); }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>${title}</h1>
+      <div class="meta">
+        Game ID: ${referenceReport.meta.gameID} |
+        Map: ${referenceReport.meta.map} (${referenceReport.meta.mapSize}) |
+        Turns: ${referenceReport.meta.numTurns}
+      </div>
+    </header>
+    <main>
+      ${injectionWarnings.length > 0 ? `
+        <div class="warnings">
+          <h4>⚠️ State Injection Warnings</h4>
+          <ul>
+            ${injectionWarnings.map(w => `<li>${w}</li>`).join('')}
+          </ul>
+        </div>
+      ` : ''}
+
+      <table class="diff-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Reference (${refCommit})</th>
+            <th>Comparison (${cmpCommit})</th>
+            <th>Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${generateMetricRows(referenceReport, comparisonReport)}
+        </tbody>
+      </table>
+
+      <div class="comparison-grid">
+        <div class="report-section">
+          <h3>Reference Commit (${refCommit})</h3>
+          <div class="chart" id="chart-ref-tick-times"></div>
+        </div>
+        <div class="report-section">
+          <h3>Comparison Commit (${cmpCommit})</h3>
+          <div class="chart" id="chart-cmp-tick-times"></div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const data = ${safeJson};
+
+      // Simple chart rendering for comparison
+      function renderTickTimeChart(selector, samples, color) {
+        const chart = d3.select(selector);
+        const margin = {top: 20, right: 20, bottom: 30, left: 50};
+        const width = chart.node().getBoundingClientRect().width - margin.left - margin.right;
+        const height = 200 - margin.top - margin.bottom;
+
+        const svg = chart.append("svg")
+          .attr("width", width + margin.left + margin.right)
+          .attr("height", height + margin.top + margin.bottom)
+          .append("g")
+          .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+        const x = d3.scaleLinear()
+          .domain(d3.extent(samples, d => d.turnNumber))
+          .range([0, width]);
+
+        const y = d3.scaleLinear()
+          .domain([0, d3.max(samples, d => d.tickExecutionMs)])
+          .range([height, 0]);
+
+        svg.append("g")
+          .attr("transform", "translate(0," + height + ")")
+          .call(d3.axisBottom(x).ticks(5));
+
+        svg.append("g")
+          .call(d3.axisLeft(y));
+
+        svg.append("path")
+          .datum(samples)
+          .attr("fill", "none")
+          .attr("stroke", color)
+          .attr("stroke-width", 1.5)
+          .attr("d", d3.line()
+            .x(d => x(d.turnNumber))
+            .y(d => y(d.tickExecutionMs))
+          );
+      }
+
+      renderTickTimeChart("#chart-ref-tick-times", data.referenceReport.samples, "#60a5fa");
+      renderTickTimeChart("#chart-cmp-tick-times", data.comparisonReport.samples, "#f97316");
+    </script>
+  </body>
+</html>`;
+}
+
+function generateMetricRows(ref: ReplayPerfReport, cmp: ReplayPerfReport): string {
+  const metrics = [
+    {
+      label: "Avg Tick (ms)",
+      ref: ref.summary.tickExecutionMs.avg.toFixed(2),
+      cmp: cmp.summary.tickExecutionMs.avg.toFixed(2),
+      delta: ((cmp.summary.tickExecutionMs.avg / ref.summary.tickExecutionMs.avg - 1) * 100).toFixed(1) + "%"
+    },
+    {
+      label: "P50 Tick (ms)",
+      ref: ref.summary.tickExecutionMs.p50.toFixed(2),
+      cmp: cmp.summary.tickExecutionMs.p50.toFixed(2),
+      delta: ((cmp.summary.tickExecutionMs.p50 / ref.summary.tickExecutionMs.p50 - 1) * 100).toFixed(1) + "%"
+    },
+    {
+      label: "P95 Tick (ms)",
+      ref: ref.summary.tickExecutionMs.p95.toFixed(2),
+      cmp: cmp.summary.tickExecutionMs.p95.toFixed(2),
+      delta: ((cmp.summary.tickExecutionMs.p95 / ref.summary.tickExecutionMs.p95 - 1) * 100).toFixed(1) + "%"
+    },
+    {
+      label: "Max Tick (ms)",
+      ref: ref.summary.tickExecutionMs.max.toFixed(2),
+      cmp: cmp.summary.tickExecutionMs.max.toFixed(2),
+      delta: ((cmp.summary.tickExecutionMs.max / ref.summary.tickExecutionMs.max - 1) * 100).toFixed(1) + "%"
+    },
+    {
+      label: "Hash Mismatches",
+      ref: ref.summary.hashChecks.mismatches.toString(),
+      cmp: cmp.summary.hashChecks.mismatches.toString(),
+      delta: (cmp.summary.hashChecks.mismatches - ref.summary.hashChecks.mismatches).toString()
+    },
+    {
+      label: "Total Intents",
+      ref: ref.summary.intents.total.toString(),
+      cmp: cmp.summary.intents.total.toString(),
+      delta: (cmp.summary.intents.total - ref.summary.intents.total).toString()
+    }
+  ];
+
+  return metrics.map(m => {
+    const deltaClass = m.delta.startsWith('-') ? 'diff-negative' : (m.delta === '0' || m.delta === '0%') ? 'diff-neutral' : 'diff-positive';
+    return `<tr>
+      <td>${m.label}</td>
+      <td class="mono">${m.ref}</td>
+      <td class="mono">${m.cmp}</td>
+      <td class="mono ${deltaClass}">${m.delta}</td>
+    </tr>`;
+  }).join('');
+}
+
 export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
   const safeJson = JSON.stringify(report).replace(/</g, "\\u003c");
   const title = `OpenFront Replay Perf Report - ${report.meta.gameID}`;
