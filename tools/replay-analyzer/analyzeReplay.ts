@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import inspector from "node:inspector";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
@@ -73,6 +74,19 @@ async function firstExistingPath(paths: string[]): Promise<string> {
   throw new Error(`File not found (tried):\n${paths.map((p) => `- ${p}`).join("\n")}`);
 }
 
+function inspectorPost<T>(
+  session: inspector.Session,
+  method: string,
+  params: Record<string, any> = {},
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    session.post(method, params, (err, result) => {
+      if (err) reject(err);
+      else resolve(result as T);
+    });
+  });
+}
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const analyzerRoot = path.resolve(__dirname);
@@ -90,6 +104,7 @@ const {
   cacheDir,
   install,
   apiBase,
+  cpuProfile,
 } = parseArgs(process.argv.slice(2));
 if (help || !replayPath) {
   console.log(usage());
@@ -142,9 +157,25 @@ const loaded = await loadReplay({ replayPath: absoluteReplayPath, maxTurns, open
 const consoleCapture = createConsoleCapture({ verbose, topN: 15 });
 const economyTracker = createEconomyTracker({ sampleEveryTurns: economySampleEvery, topN: 12 });
 
+const defaultOutDir = path.join(repoRoot, "replays", "out");
+await fs.mkdir(defaultOutDir, { recursive: true });
+
+const replayBase = path.basename(loaded.absoluteReplayPath).replace(/[^a-zA-Z0-9_.-]+/g, "_");
+const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+const profileOutPath = path.join(defaultOutDir, `${replayBase}.${timestamp}.cpuprofile`);
+
 let sim!: Awaited<ReturnType<typeof simulateReplay>>;
 let elapsedMs = 0;
+let cpuProfileResult: any = null;
+let profSession: inspector.Session | null = null;
 try {
+  if (cpuProfile) {
+    profSession = new inspector.Session();
+    profSession.connect();
+    await inspectorPost(profSession, "Profiler.enable");
+    await inspectorPost(profSession, "Profiler.start");
+  }
+
   sim = await simulateReplay({
     openfront,
     gameStartInfo: loaded.gameStartInfo,
@@ -161,6 +192,15 @@ try {
   });
   elapsedMs = sim.elapsedMs;
 } finally {
+  if (profSession) {
+    try {
+      cpuProfileResult = await inspectorPost<{ profile: any }>(profSession, "Profiler.stop");
+      await fs.writeFile(profileOutPath, JSON.stringify(cpuProfileResult.profile), "utf8");
+      rawLog(`cpu profile: ${profileOutPath}`);
+    } finally {
+      profSession.disconnect();
+    }
+  }
   consoleCapture.restore();
 }
 
@@ -230,14 +270,9 @@ const report: ReplayPerfReport = {
 };
 
 const d3Source = await fs.readFile(d3Path, "utf8");
-
-const defaultOutDir = path.join(repoRoot, "replays", "out");
-await fs.mkdir(defaultOutDir, { recursive: true });
-
-const replayBase = path.basename(loaded.absoluteReplayPath).replace(/[^a-zA-Z0-9_.-]+/g, "_");
 const defaultOutPath = path.join(
   defaultOutDir,
-  `${replayBase}.${new Date().toISOString().replace(/[:.]/g, "-")}.report.html`,
+  `${replayBase}.${timestamp}.report.html`,
 );
 const finalOutPath = outPath ? path.resolve(process.cwd(), outPath) : defaultOutPath;
 await fs.writeFile(finalOutPath, reportHtml(d3Source, report), "utf8");

@@ -14,6 +14,9 @@ export function usage(): string {
     "Replay fetching:",
     "  --apiBase <url>            Fetch replay by id from this API (default: https://api.openfront.io).",
     "",
+    "Profiling:",
+    "  --cpuProfile               Write a V8 CPU profile (.cpuprofile) for the replay run.",
+    "",
     "Notes:",
     "  - Accepts OpenFront GameRecord / PartialGameRecord JSON.",
     "  - Runs the same tick engine used by the worker (GameRunner) and records per-tick execution time.",
@@ -33,6 +36,7 @@ export function parseArgs(argv: string[]): {
   cacheDir: string | null;
   install: boolean;
   apiBase: string;
+  cpuProfile: boolean;
 } {
   let replayPath: string | null = null;
   let outPath: string | null = null;
@@ -45,6 +49,7 @@ export function parseArgs(argv: string[]): {
   let cacheDir: string | null = null;
   let install = true;
   let apiBase = "https://api.openfront.io";
+  let cpuProfile = false;
 
   const args = [...argv];
   while (args.length > 0) {
@@ -82,6 +87,10 @@ export function parseArgs(argv: string[]): {
     if (arg === "--apiBase") {
       apiBase = args.shift() ?? "";
       if (!apiBase) throw new Error("Missing value for --apiBase");
+      continue;
+    }
+    if (arg === "--cpuProfile") {
+      cpuProfile = true;
       continue;
     }
     if (arg === "--maxTurns") {
@@ -122,5 +131,6 @@ export function parseArgs(argv: string[]): {
     cacheDir,
     install,
     apiBase,
+    cpuProfile,
   };
 }

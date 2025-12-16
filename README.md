@@ -41,6 +41,7 @@ Common flags:
 - `--maxTurns 5000`
 - `--economySampleEvery 10`
 - `--verbose`
+- `--cpuProfile` (writes `replays/out/*.cpuprofile` for the replay run)
 - `--repo <git-url>` (default `https://github.com/OpenFrontIO/OpenFrontIO.git`)
 - `--cacheDir <path>` (default `.cache/openfront` in this repo)
 - `--apiBase <url>` (default `https://api.openfront.io`)
