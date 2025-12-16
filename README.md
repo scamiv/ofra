@@ -46,7 +46,26 @@ Common flags:
 - `--cacheDir <path>` (default `.cache/openfront` in this repo)
 - `--apiBase <url>` (default `https://api.openfront.io`)
 
+## Analyzing CPU Profiles
+
+The `--cpuProfile` flag generates a `.cpuprofile` file that can be analyzed with several tools:
+
+### Chrome DevTools
+
+Open Chrome DevTools → Performance tab → Load profile, https://developer.chrome.com/docs/devtools/performance/reference#analyze.
+
+### speedscope
+
+Upload your `.cpuprofile` to [speedscope.app](https://www.speedscope.app/) for an interactive flame graph visualization.
+
+### VS Code
+
+VS Code has built-in support for analyzing CPU profiles:
+
+- **Built-in**: Open the `.cpuprofile` file directly in VS Code. See [VS Code Node.js Profiling docs](https://code.visualstudio.com/docs/nodejs/profiling#_analyzing-a-profile).
+- **Flame Graph Extension**: Install [vscode-js-profile-flame](https://marketplace.visualstudio.com/items?itemName=ms-vscode.vscode-js-profile-flame) for flame graph visualization directly in the editor.
+
 ## Notes
 
-- Fetching requires `git` and network access to the OpenFront Git remote (and auth if the repo is private).
 - Reports are written to `replays/out/` by default (gitignored).
+
