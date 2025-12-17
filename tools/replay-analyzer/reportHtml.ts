@@ -94,39 +94,43 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
       <div class="grid" style="margin-top: 14px;">
         <!-- Income Sources -->
         <div class="card">
-          <h2>💰 Gold earned: trade ships</h2>
+          <h2>💰 Gold earned: trade ships (K)</h2>
           <div id="chart-gold-earned-trade" class="chart"></div>
         </div>
         <div class="card">
-          <h2>🚂 Gold earned: rail/trains</h2>
+          <h2>🚂 Gold earned: rail/trains (K)</h2>
           <div id="chart-gold-earned-train" class="chart"></div>
         </div>
         <div class="card">
-          <h2>⚔️ Gold earned: conquest/war</h2>
+          <h2>⚔️ Gold earned: conquest/war (K)</h2>
           <div id="chart-gold-earned-conquer" class="chart"></div>
         </div>
         <div class="card">
-          <h2>📊 Total gold earned by source</h2>
+          <h2>📊 Gold income sources breakdown (K)</h2>
           <div id="chart-gold-sources" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>👥 Troop sources breakdown</h2>
+          <div id="chart-troop-sources" class="chart"></div>
         </div>
 
         <!-- Spending & Balance -->
         <div class="card">
-          <h2>💸 Gold spent: total</h2>
+          <h2>💸 Gold spent: total (K)</h2>
           <div id="chart-gold-spent-total" class="chart"></div>
         </div>
         <div class="card">
-          <h2>⚖️ Gold earned: other (residual)</h2>
+          <h2>⚖️ Gold earned: other (residual) (K)</h2>
           <div id="chart-gold-earned-other" class="chart"></div>
         </div>
 
         <!-- Diplomatic Activity -->
         <div class="card">
-          <h2>🤝 Gold donations sent</h2>
+          <h2>🤝 Gold donations sent (K)</h2>
           <div id="chart-gold-donations-sent" class="chart"></div>
         </div>
         <div class="card">
-          <h2>🎁 Gold donations received</h2>
+          <h2>🎁 Gold donations received (K)</h2>
           <div id="chart-gold-donations-received" class="chart"></div>
         </div>
         <div class="card">
@@ -559,10 +563,39 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
             ys: (econ.seriesByClientId && econ.seriesByClientId[cid] && econ.seriesByClientId[cid][metric]) ? econ.seriesByClientId[cid][metric] : [],
           }));
 
-          renderMultiLineChart("chart-gold-earned-trade", econ.turns, mkLines("earnedTrade", econ.top.earnedTrade), {});
-          renderMultiLineChart("chart-gold-earned-train", econ.turns, mkLines("earnedTrain", econ.top.earnedTrain), {});
-          renderMultiLineChart("chart-gold-earned-conquer", econ.turns, mkLines("earnedConquer", econ.top.earnedConquer), {});
-          renderMultiLineChart("chart-gold-earned-other", econ.turns, mkLines("earnedOther", econ.top.earnedOther), {});
+          // Create aggregated lines from detailed gold sources
+          const aggregateGoldSources = (filterFn, topIds) => {
+            return (topIds || []).map((cid, idx) => {
+              const result = {
+                id: cid,
+                label: labelByClientId.get(cid) || cid,
+                color: colors[idx % colors.length],
+                ys: []
+              };
+              for (let turnIdx = 0; turnIdx < econ.turns.length; turnIdx++) {
+                let total = 0;
+                if (econ.goldSourceSeriesByClientId[cid]) {
+                  const sourceData = econ.goldSourceSeriesByClientId[cid];
+                  for (const func in sourceData) {
+                    if (filterFn(func) && sourceData[func][turnIdx] !== undefined) {
+                      total += sourceData[func][turnIdx];
+                    }
+                  }
+                }
+                result.ys.push(total);
+              }
+              return result;
+            });
+          };
+
+          renderMultiLineChart("chart-gold-earned-trade", econ.turns, aggregateGoldSources(
+            (func) => func.includes('TradeShip'), econ.top.earnedTrade), {});
+          renderMultiLineChart("chart-gold-earned-train", econ.turns, aggregateGoldSources(
+            (func) => func.includes('StopHandler') || func.includes('TrainStation'), econ.top.earnedTrain), {});
+          renderMultiLineChart("chart-gold-earned-conquer", econ.turns, aggregateGoldSources(
+            (func) => func.includes('conquer'), econ.top.earnedConquer), {});
+          renderMultiLineChart("chart-gold-earned-other", econ.turns, aggregateGoldSources(
+            (func) => !func.includes('TradeShip') && !func.includes('StopHandler') && !func.includes('TrainStation') && !func.includes('conquer') && !func.includes('Troop') && !func.includes('ConstructionExecution') && !func.includes('donateGold'), econ.top.earnedOther), {});
           renderMultiLineChart("chart-gold-spent-total", econ.turns, mkLines("spentTotal", econ.top.spentTotal), {});
 
           renderMultiLineChart("chart-gold-donations-sent", econ.turns, mkLines("sentGoldDonations", econ.top.sentGoldDonations), {});
@@ -571,12 +604,15 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           renderMultiLineChart("chart-troop-donations-received", econ.turns, mkLines("receivedTroopDonations", econ.top.receivedTroopDonations), {});
           renderMultiLineChart("chart-tiles-owned", econ.turns, mkLines("tilesOwned", Object.keys(econ.seriesByClientId)), {});
 
-          // Render gold sources by function
+          // Render gold sources by function (raw function names for maximum detail)
           if (econ.goldSourceSeriesByClientId) {
             const allFunctions = new Set();
             for (const clientId of Object.keys(econ.goldSourceSeriesByClientId)) {
               for (const func of Object.keys(econ.goldSourceSeriesByClientId[clientId])) {
-                allFunctions.add(func);
+                // Only include gold-related sources, exclude troop donations and construction
+                if (!func.includes('Troop') && !func.includes('ConstructionExecution')) {
+                  allFunctions.add(func);
+                }
               }
             }
 
@@ -597,6 +633,34 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
             }));
 
             renderMultiLineChart("chart-gold-sources", econ.turns, sourceLines, {});
+          }
+
+          // Render troop sources by function
+          if (econ.troopSourceSeriesByClientId) {
+            const allTroopFunctions = new Set();
+            for (const clientId of Object.keys(econ.troopSourceSeriesByClientId)) {
+              for (const func of Object.keys(econ.troopSourceSeriesByClientId[clientId])) {
+                allTroopFunctions.add(func);
+              }
+            }
+
+            const troopSourceLines = Array.from(allTroopFunctions).map((func, idx) => ({
+              id: func,
+              label: func,
+              color: colors[idx % colors.length],
+              ys: econ.turns.map((_, turnIdx) => {
+                let total = 0;
+                for (const clientId of Object.keys(econ.troopSourceSeriesByClientId)) {
+                  const series = econ.troopSourceSeriesByClientId[clientId][func];
+                  if (series && series[turnIdx] !== undefined) {
+                    total += series[turnIdx];
+                  }
+                }
+                return total;
+              }),
+            }));
+
+            renderMultiLineChart("chart-troop-sources", econ.turns, troopSourceLines, {});
           }
         }
 

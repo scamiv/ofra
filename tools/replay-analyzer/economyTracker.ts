@@ -54,6 +54,9 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
   const prevGoldStatsByClientId = new Map<string, GoldStats>();
   const clientIdByPlayerId = new Map<string, string>();
   const prevGoldSourcesByClientId = new Map<string, GoldSourceBreakdown>();
+  const troopSourcesByClientId: Record<string, TroopSourceBreakdown> = {};
+  const troopSourceSeriesByClientId: Record<string, TroopSourceSeries> = {};
+  const prevTroopSourcesByClientId = new Map<string, TroopSourceBreakdown>();
 
   function ensurePlayer(p: any) {
     const cid = p.clientID();
@@ -91,66 +94,30 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
     });
     goldSourcesByClientId[cid] = {};
     goldSourceSeriesByClientId[cid] = {};
+    troopSourcesByClientId[cid] = {};
+    troopSourceSeriesByClientId[cid] = {};
 
     // Hook the addGold method to track callers
     const originalAddGold = p.addGold;
     p.addGold = function(toAdd: bigint, tile?: any) {
-      // Analyze stack trace to determine gold source
+      // Find the first non-tracker function in the stack trace
       const stack = new Error().stack || '';
-      let callerFunction = 'unknown';
-
-      // Split stack into lines and find the most relevant caller
       const stackLines = stack.split('\n').slice(1); // Skip the first line (Error itself)
 
+      let callerFunction = 'unknown';
       for (const line of stackLines) {
         // Skip lines that are part of our tracking code
         if (line.includes('economyTracker') || line.includes('at addGold')) {
           continue;
         }
 
-        // Look for function names in the stack
+        // Extract function name from stack trace
         const match = line.match(/at\s+([^\s(]+(?:\.[^\s(]+)?)\s*\(/);
         if (match) {
-          const functionName = match[1];
-
-          // Categorize based on known patterns
-          if (functionName.includes('donateGold')) {
-            callerFunction = 'receivedGoldDonation';
-            break;
-          } else if (functionName.includes('donateTroops')) {
-            callerFunction = 'sentTroopDonation';
-            break;
-          } else if (functionName.includes('PlayerExecution')) {
-            callerFunction = 'workers';
-            break;
-          } else if (functionName.includes('TrainStation') || functionName.includes('StopHandler') || functionName === 'onStop') {
-            callerFunction = 'trains';
-            break;
-          } else if (functionName.includes('TradeShip')) {
-            callerFunction = 'trade';
-            break;
-          } else if (functionName.includes('conquer')) {
-            callerFunction = 'conquest';
-            break;
-          } else if (functionName.includes('CityExecution') || functionName.includes('FactoryExecution') || functionName.includes('PortExecution')) {
-            // City/Factory/Port income from structures
-            callerFunction = 'structures';
-            break;
-          } else if (functionName.includes('Stats') || functionName.includes('goldWork') || functionName.includes('goldTrain') || functionName.includes('goldWar') || functionName.includes('goldTrade') || functionName.includes('goldSteal') || functionName.includes('ConstructionExecution')) {
-            // Skip stats-related calls and construction (doesn't generate income), look for the next one
-            continue;
-          } else {
-            // For debugging, include more function names
-            if (functionName.includes('Execution') || functionName.includes('tick')) {
-              callerFunction = functionName;
-              break;
-            }
-            // Skip other unknown functions, look for the next one
-            continue;
-          }
+          callerFunction = match[1];
+          break; // Use the first valid function found
         }
       }
-
 
       // Track the gold source cumulatively
       if (!goldSourcesByClientId[cid][callerFunction]) {
@@ -198,10 +165,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       // Track troop changes (for donations)
       if (callerFunction === 'receivedTroopDonation') {
         // This is a received troop donation
-        if (!goldSourcesByClientId[cid]['receivedTroopDonation']) {
-          goldSourcesByClientId[cid]['receivedTroopDonation'] = 0n;
+        if (!troopSourcesByClientId[cid]['receivedTroopDonation']) {
+          troopSourcesByClientId[cid]['receivedTroopDonation'] = 0n;
         }
-        goldSourcesByClientId[cid]['receivedTroopDonation'] += BigInt(Math.round(toAdd));
+        troopSourcesByClientId[cid]['receivedTroopDonation'] += BigInt(Math.round(toAdd));
       }
 
       // Call original method
@@ -228,10 +195,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       const originalDonateTroops = p.donateTroops;
       p.donateTroops = function(recipient: any, troops: number) {
         // Track sent troop donation
-        if (!goldSourcesByClientId[cid]['sentTroopDonation']) {
-          goldSourcesByClientId[cid]['sentTroopDonation'] = 0n;
+        if (!troopSourcesByClientId[cid]['sentTroopDonation']) {
+          troopSourcesByClientId[cid]['sentTroopDonation'] = 0n;
         }
-        goldSourcesByClientId[cid]['sentTroopDonation'] += BigInt(Math.round(troops));
+        troopSourcesByClientId[cid]['sentTroopDonation'] += BigInt(Math.round(troops));
 
         // Call original method
         return originalDonateTroops.call(this, recipient, troops);
@@ -242,6 +209,7 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
     prevGoldByClientId.set(cid, p.gold());
     prevGoldStatsByClientId.set(cid, { work: 0n, war: 0n, trade: 0n, steal: 0n, train: 0n });
     prevGoldSourcesByClientId.set(cid, {});
+    prevTroopSourcesByClientId.set(cid, {});
   }
 
   return {
@@ -312,12 +280,15 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
         const deltaSpentOther = deltaOutflow - deltaLostConquest;
 
         // Calculate donation diffs
-        const prevSources = prevGoldSourcesByClientId.get(cid) || {};
-        const currSources = goldSourcesByClientId[cid] || {};
-        const dSentGoldDonations = (currSources.sentGoldDonation || 0n) - (prevSources.sentGoldDonation || 0n);
-        const dReceivedGoldDonations = (currSources.receivedGoldDonation || 0n) - (prevSources.receivedGoldDonation || 0n);
-        const dSentTroopDonations = (currSources.sentTroopDonation || 0n) - (prevSources.sentTroopDonation || 0n);
-        const dReceivedTroopDonations = (currSources.receivedTroopDonation || 0n) - (prevSources.receivedTroopDonation || 0n);
+        const prevGoldSources = prevGoldSourcesByClientId.get(cid) || {};
+        const currGoldSources = goldSourcesByClientId[cid] || {};
+        const prevTroopSources = prevTroopSourcesByClientId.get(cid) || {};
+        const currTroopSources = troopSourcesByClientId[cid] || {};
+
+        const dSentGoldDonations = (currGoldSources.sentGoldDonation || 0n) - (prevGoldSources.sentGoldDonation || 0n);
+        const dReceivedGoldDonations = (currGoldSources.receivedGoldDonation || 0n) - (prevGoldSources.receivedGoldDonation || 0n);
+        const dSentTroopDonations = (currTroopSources.sentTroopDonation || 0n) - (prevTroopSources.sentTroopDonation || 0n);
+        const dReceivedTroopDonations = (currTroopSources.receivedTroopDonation || 0n) - (prevTroopSources.receivedTroopDonation || 0n);
 
         const totals = totalsByClientId.get(cid);
         if (totals) {
@@ -340,6 +311,7 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
 
         // Update previous gold sources
         prevGoldSourcesByClientId.set(cid, { ...goldSourcesByClientId[cid] });
+        prevTroopSourcesByClientId.set(cid, { ...troopSourcesByClientId[cid] });
       }
 
       const shouldSample = turnNumber % opts.sampleEveryTurns === 0 || isLast;
@@ -353,15 +325,15 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           const series = seriesByClientId[cid];
           const sourceSeries = goldSourceSeriesByClientId[cid];
           if (!totals || !series) continue;
-          series.earnedTrade.push(bigintToNumberSafe(totals.earnedTrade));
-          series.earnedTrain.push(bigintToNumberSafe(totals.earnedTrain));
-          series.earnedConquer.push(bigintToNumberSafe(totals.earnedConquer));
-          series.earnedOther.push(bigintToNumberSafe(totals.earnedOther));
-          series.spentTotal.push(bigintToNumberSafe(totals.spentTotal));
-          series.spentOther.push(bigintToNumberSafe(totals.spentOther));
-          series.lostConquest.push(bigintToNumberSafe(totals.lostConquest));
-          series.sentGoldDonations.push(bigintToNumberSafe(totals.sentGoldDonations));
-          series.receivedGoldDonations.push(bigintToNumberSafe(totals.receivedGoldDonations));
+          series.earnedTrade.push(bigintToNumberSafe(totals.earnedTrade) / 1000);
+          series.earnedTrain.push(bigintToNumberSafe(totals.earnedTrain) / 1000);
+          series.earnedConquer.push(bigintToNumberSafe(totals.earnedConquer) / 1000);
+          series.earnedOther.push(bigintToNumberSafe(totals.earnedOther) / 1000);
+          series.spentTotal.push(bigintToNumberSafe(totals.spentTotal) / 1000);
+          series.spentOther.push(bigintToNumberSafe(totals.spentOther) / 1000);
+          series.lostConquest.push(bigintToNumberSafe(totals.lostConquest) / 1000);
+          series.sentGoldDonations.push(bigintToNumberSafe(totals.sentGoldDonations) / 1000);
+          series.receivedGoldDonations.push(bigintToNumberSafe(totals.receivedGoldDonations) / 1000);
           series.sentTroopDonations.push(bigintToNumberSafe(totals.sentTroopDonations));
           series.receivedTroopDonations.push(bigintToNumberSafe(totals.receivedTroopDonations));
           series.tilesOwned.push(p.numTilesOwned());
@@ -372,15 +344,41 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           // First, ensure all existing series have an entry for this sample point
           for (const callerFunction of Object.keys(sourceSeries)) {
             const currentValue = sources[callerFunction] || 0n;
-            sourceSeries[callerFunction].push(bigintToNumberSafe(currentValue));
+            // Divide gold-related values by 1000 for display
+            const isGoldValue = callerFunction.includes('Gold') || ['workers', 'trains', 'trade', 'conquest', 'unknown'].includes(callerFunction);
+            const displayValue = isGoldValue ? bigintToNumberSafe(currentValue) / 1000 : bigintToNumberSafe(currentValue);
+            sourceSeries[callerFunction].push(displayValue);
           }
 
           // Then add any new functions that appeared this turn
           for (const callerFunction of Object.keys(sources)) {
             if (!sourceSeries[callerFunction]) {
               // New function - create series with 0s for all previous sample points
-              sourceSeries[callerFunction] = new Array(turns.length - 1).fill(0);
-              sourceSeries[callerFunction].push(bigintToNumberSafe(sources[callerFunction]));
+              const isGoldValue = callerFunction.includes('Gold') || ['workers', 'trains', 'trade', 'conquest', 'unknown'].includes(callerFunction);
+              const fillValue = isGoldValue ? 0 : 0; // Both are 0, but keeping logic for clarity
+              sourceSeries[callerFunction] = new Array(turns.length - 1).fill(fillValue);
+              const currentValue = bigintToNumberSafe(sources[callerFunction]);
+              const displayValue = isGoldValue ? currentValue / 1000 : currentValue;
+              sourceSeries[callerFunction].push(displayValue);
+            }
+          }
+
+          // Handle troop source series
+          const troopSeries = troopSourceSeriesByClientId[cid];
+          const troopSources = troopSourcesByClientId[cid];
+
+          // First, ensure all existing troop series have an entry for this sample point
+          for (const callerFunction of Object.keys(troopSeries)) {
+            const currentValue = troopSources[callerFunction] || 0n;
+            troopSeries[callerFunction].push(bigintToNumberSafe(currentValue));
+          }
+
+          // Then add any new troop functions that appeared this turn
+          for (const callerFunction of Object.keys(troopSources)) {
+            if (!troopSeries[callerFunction]) {
+              // New function - create series with 0s for all previous sample points
+              troopSeries[callerFunction] = new Array(turns.length - 1).fill(0);
+              troopSeries[callerFunction].push(bigintToNumberSafe(troopSources[callerFunction]));
             }
           }
         }
@@ -392,10 +390,21 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       for (const [clientId, sources] of Object.entries(goldSourcesByClientId)) {
         goldSourcesByClientIdSerializable[clientId] = {};
         for (const [func, amount] of Object.entries(sources)) {
-          goldSourcesByClientIdSerializable[clientId][func] = bigintToNumberSafe(amount);
+          // Divide gold-related values by 1000 for display
+          const isGoldValue = func.includes('Gold') || ['workers', 'trains', 'trade', 'conquest', 'unknown'].includes(func);
+          const displayValue = isGoldValue ? bigintToNumberSafe(amount) / 1000 : bigintToNumberSafe(amount);
+          goldSourcesByClientIdSerializable[clientId][func] = displayValue;
         }
       }
 
+      // Serialize troop sources
+      const troopSourcesByClientIdSerializable: Record<string, Record<string, number>> = {};
+      for (const [clientId, sources] of Object.entries(troopSourcesByClientId)) {
+        troopSourcesByClientIdSerializable[clientId] = {};
+        for (const [func, amount] of Object.entries(sources)) {
+          troopSourcesByClientIdSerializable[clientId][func] = bigintToNumberSafe(amount);
+        }
+      }
 
       return {
         sampleEveryTurns: opts.sampleEveryTurns,
@@ -404,6 +413,8 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
         seriesByClientId,
         goldSourcesByClientId: goldSourcesByClientIdSerializable,
         goldSourceSeriesByClientId,
+        troopSourcesByClientId: troopSourcesByClientIdSerializable,
+        troopSourceSeriesByClientId,
         top: {
           earnedTrade: topEconomyClientIds(totalsByClientId, "earnedTrade", opts.topN),
           earnedTrain: topEconomyClientIds(totalsByClientId, "earnedTrain", opts.topN),
