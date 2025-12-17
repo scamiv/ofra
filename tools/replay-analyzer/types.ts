@@ -43,6 +43,7 @@ export type EconomyPlayerSeries = {
   receivedGoldDonations: number[];
   sentTroopDonations: number[];
   receivedTroopDonations: number[];
+  tilesOwned: number[];
 };
 
 export type GoldSourceBreakdown = {

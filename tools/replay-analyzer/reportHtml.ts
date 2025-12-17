@@ -124,6 +124,10 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           <h2>Troop donations received (cumulative)</h2>
           <div id="chart-troop-donations-received" class="chart"></div>
         </div>
+        <div class="card">
+          <h2>Tiles owned over time</h2>
+          <div id="chart-tiles-owned" class="chart"></div>
+        </div>
       </div>
 
       <div class="card" style="margin-top: 14px;">
@@ -555,6 +559,7 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           renderMultiLineChart("chart-gold-donations-received", econ.turns, mkLines("receivedGoldDonations", econ.top.receivedGoldDonations), {});
           renderMultiLineChart("chart-troop-donations-sent", econ.turns, mkLines("sentTroopDonations", econ.top.sentTroopDonations), {});
           renderMultiLineChart("chart-troop-donations-received", econ.turns, mkLines("receivedTroopDonations", econ.top.receivedTroopDonations), {});
+          renderMultiLineChart("chart-tiles-owned", econ.turns, mkLines("tilesOwned", Object.keys(econ.seriesByClientId)), {});
 
           // Render gold sources by function
           if (econ.goldSourceSeriesByClientId) {

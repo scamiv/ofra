@@ -73,6 +73,7 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       receivedGoldDonations: [],
       sentTroopDonations: [],
       receivedTroopDonations: [],
+      tilesOwned: [],
     };
     totalsByClientId.set(cid, {
       earnedTotal: 0n,
@@ -345,6 +346,9 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       if (shouldSample) {
         turns.push(turnNumber);
         for (const { clientID: cid } of players) {
+          const p = playerByClientId.get(cid);
+          if (!p) continue;
+
           const totals = totalsByClientId.get(cid);
           const series = seriesByClientId[cid];
           const sourceSeries = goldSourceSeriesByClientId[cid];
@@ -360,6 +364,7 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           series.receivedGoldDonations.push(bigintToNumberSafe(totals.receivedGoldDonations));
           series.sentTroopDonations.push(bigintToNumberSafe(totals.sentTroopDonations));
           series.receivedTroopDonations.push(bigintToNumberSafe(totals.receivedTroopDonations));
+          series.tilesOwned.push(p.numTilesOwned());
 
           // Sample gold sources - ensure all series have entries for this sample point
           const sources = goldSourcesByClientId[cid];
