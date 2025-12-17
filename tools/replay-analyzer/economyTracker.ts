@@ -20,7 +20,7 @@ function readGoldStatsForClient(allPlayersStats: any, clientID: string): GoldSta
 
 function topEconomyClientIds(
   totalsByClientId: ReadonlyMap<string, EconomyTotals>,
-  metric: "earnedTrade" | "earnedTrain" | "earnedConquer" | "earnedOther" | "spentTotal",
+  metric: keyof EconomyTotals,
   n: number,
 ): string[] {
   return [...totalsByClientId.entries()]
@@ -69,6 +69,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       spentTotal: [],
       spentOther: [],
       lostConquest: [],
+      sentGoldDonations: [],
+      receivedGoldDonations: [],
+      sentTroopDonations: [],
+      receivedTroopDonations: [],
     };
     totalsByClientId.set(cid, {
       earnedTotal: 0n,
@@ -79,6 +83,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       spentTotal: 0n,
       spentOther: 0n,
       lostConquest: 0n,
+      sentGoldDonations: 0n,
+      receivedGoldDonations: 0n,
+      sentTroopDonations: 0n,
+      receivedTroopDonations: 0n,
     });
     goldSourcesByClientId[cid] = {};
     goldSourceSeriesByClientId[cid] = {};
@@ -105,7 +113,13 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           const functionName = match[1];
 
           // Categorize based on known patterns
-          if (functionName.includes('PlayerExecution')) {
+          if (functionName.includes('donateGold')) {
+            callerFunction = 'receivedGoldDonation';
+            break;
+          } else if (functionName.includes('donateTroops')) {
+            callerFunction = 'sentTroopDonation';
+            break;
+          } else if (functionName.includes('PlayerExecution')) {
             callerFunction = 'workers';
             break;
           } else if (functionName.includes('TrainStation') || functionName.includes('StopHandler') || functionName === 'onStop') {
@@ -146,6 +160,82 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
       // Call original method
       return originalAddGold.call(this, toAdd, tile);
     };
+
+    // Hook addTroops for donation tracking
+    const originalAddTroops = p.addTroops;
+    p.addTroops = function(toAdd: number) {
+      // Analyze stack trace to determine troop source
+      const stack = new Error().stack || '';
+      let callerFunction = 'unknown';
+
+      // Split stack into lines and find the most relevant caller
+      const stackLines = stack.split('\n').slice(1); // Skip the first line (Error itself)
+
+      for (const line of stackLines) {
+        // Skip lines that are part of our tracking code
+        if (line.includes('economyTracker') || line.includes('at addTroops')) {
+          continue;
+        }
+
+        // Look for function names in the stack
+        const match = line.match(/at\s+([^\s(]+(?:\.[^\s(]+)?)\s*\(/);
+        if (match) {
+          const functionName = match[1];
+
+          // Categorize based on known patterns
+          if (functionName.includes('donateTroops')) {
+            callerFunction = 'receivedTroopDonation';
+            break;
+          } else if (functionName.includes('PlayerExecution')) {
+            callerFunction = 'workers';
+            break;
+          }
+          // Add more patterns as needed
+        }
+      }
+
+      // Track troop changes (for donations)
+      if (callerFunction === 'receivedTroopDonation') {
+        // This is a received troop donation
+        if (!goldSourcesByClientId[cid]['receivedTroopDonation']) {
+          goldSourcesByClientId[cid]['receivedTroopDonation'] = 0n;
+        }
+        goldSourcesByClientId[cid]['receivedTroopDonation'] += BigInt(Math.round(toAdd));
+      }
+
+      // Call original method
+      return originalAddTroops.call(this, toAdd);
+    };
+
+    // Hook donateGold for sent donation tracking
+    if (p.donateGold) {
+      const originalDonateGold = p.donateGold;
+      p.donateGold = function(recipient: any, gold: bigint) {
+        // Track sent gold donation
+        if (!goldSourcesByClientId[cid]['sentGoldDonation']) {
+          goldSourcesByClientId[cid]['sentGoldDonation'] = 0n;
+        }
+        goldSourcesByClientId[cid]['sentGoldDonation'] += gold;
+
+        // Call original method
+        return originalDonateGold.call(this, recipient, gold);
+      };
+    }
+
+    // Hook donateTroops for sent donation tracking
+    if (p.donateTroops) {
+      const originalDonateTroops = p.donateTroops;
+      p.donateTroops = function(recipient: any, troops: number) {
+        // Track sent troop donation
+        if (!goldSourcesByClientId[cid]['sentTroopDonation']) {
+          goldSourcesByClientId[cid]['sentTroopDonation'] = 0n;
+        }
+        goldSourcesByClientId[cid]['sentTroopDonation'] += BigInt(Math.round(troops));
+
+        // Call original method
+        return originalDonateTroops.call(this, recipient, troops);
+      };
+    }
 
     playerByClientId.set(cid, p);
     prevGoldByClientId.set(cid, p.gold());
@@ -220,6 +310,14 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
         const deltaLostConquest = minBigInt(deltaOutflow, conquestLoss);
         const deltaSpentOther = deltaOutflow - deltaLostConquest;
 
+        // Calculate donation diffs
+        const prevSources = prevGoldSourcesByClientId.get(cid) || {};
+        const currSources = goldSourcesByClientId[cid] || {};
+        const dSentGoldDonations = (currSources.sentGoldDonation || 0n) - (prevSources.sentGoldDonation || 0n);
+        const dReceivedGoldDonations = (currSources.receivedGoldDonation || 0n) - (prevSources.receivedGoldDonation || 0n);
+        const dSentTroopDonations = (currSources.sentTroopDonation || 0n) - (prevSources.sentTroopDonation || 0n);
+        const dReceivedTroopDonations = (currSources.receivedTroopDonation || 0n) - (prevSources.receivedTroopDonation || 0n);
+
         const totals = totalsByClientId.get(cid);
         if (totals) {
           totals.earnedTrade += dTrade;
@@ -230,6 +328,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           totals.spentTotal += deltaOutflow;
           totals.spentOther += deltaSpentOther;
           totals.lostConquest += deltaLostConquest;
+          totals.sentGoldDonations += dSentGoldDonations;
+          totals.receivedGoldDonations += dReceivedGoldDonations;
+          totals.sentTroopDonations += dSentTroopDonations;
+          totals.receivedTroopDonations += dReceivedTroopDonations;
         }
 
         prevGoldByClientId.set(cid, goldNow);
@@ -254,6 +356,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           series.spentTotal.push(bigintToNumberSafe(totals.spentTotal));
           series.spentOther.push(bigintToNumberSafe(totals.spentOther));
           series.lostConquest.push(bigintToNumberSafe(totals.lostConquest));
+          series.sentGoldDonations.push(bigintToNumberSafe(totals.sentGoldDonations));
+          series.receivedGoldDonations.push(bigintToNumberSafe(totals.receivedGoldDonations));
+          series.sentTroopDonations.push(bigintToNumberSafe(totals.sentTroopDonations));
+          series.receivedTroopDonations.push(bigintToNumberSafe(totals.receivedTroopDonations));
 
           // Sample gold sources - ensure all series have entries for this sample point
           const sources = goldSourcesByClientId[cid];
@@ -299,6 +405,10 @@ export function createEconomyTracker(opts: { sampleEveryTurns: number; topN: num
           earnedConquer: topEconomyClientIds(totalsByClientId, "earnedConquer", opts.topN),
           earnedOther: topEconomyClientIds(totalsByClientId, "earnedOther", opts.topN),
           spentTotal: topEconomyClientIds(totalsByClientId, "spentTotal", opts.topN),
+          sentGoldDonations: topEconomyClientIds(totalsByClientId, "sentGoldDonations", opts.topN),
+          receivedGoldDonations: topEconomyClientIds(totalsByClientId, "receivedGoldDonations", opts.topN),
+          sentTroopDonations: topEconomyClientIds(totalsByClientId, "sentTroopDonations", opts.topN),
+          receivedTroopDonations: topEconomyClientIds(totalsByClientId, "receivedTroopDonations", opts.topN),
         },
       };
     },

@@ -108,6 +108,22 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           <h2>Gold earned: other (residual) (cumulative)</h2>
           <div id="chart-gold-earned-other" class="chart"></div>
         </div>
+        <div class="card">
+          <h2>Gold donations sent (cumulative)</h2>
+          <div id="chart-gold-donations-sent" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>Gold donations received (cumulative)</h2>
+          <div id="chart-gold-donations-received" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>Troop donations sent (cumulative)</h2>
+          <div id="chart-troop-donations-sent" class="chart"></div>
+        </div>
+        <div class="card">
+          <h2>Troop donations received (cumulative)</h2>
+          <div id="chart-troop-donations-received" class="chart"></div>
+        </div>
       </div>
 
       <div class="card" style="margin-top: 14px;">
@@ -534,6 +550,11 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           renderMultiLineChart("chart-gold-earned-conquer", econ.turns, mkLines("earnedConquer", econ.top.earnedConquer), {});
           renderMultiLineChart("chart-gold-earned-other", econ.turns, mkLines("earnedOther", econ.top.earnedOther), {});
           renderMultiLineChart("chart-gold-spent-total", econ.turns, mkLines("spentTotal", econ.top.spentTotal), {});
+
+          renderMultiLineChart("chart-gold-donations-sent", econ.turns, mkLines("sentGoldDonations", econ.top.sentGoldDonations), {});
+          renderMultiLineChart("chart-gold-donations-received", econ.turns, mkLines("receivedGoldDonations", econ.top.receivedGoldDonations), {});
+          renderMultiLineChart("chart-troop-donations-sent", econ.turns, mkLines("sentTroopDonations", econ.top.sentTroopDonations), {});
+          renderMultiLineChart("chart-troop-donations-received", econ.turns, mkLines("receivedTroopDonations", econ.top.receivedTroopDonations), {});
 
           // Render gold sources by function
           if (econ.goldSourceSeriesByClientId) {

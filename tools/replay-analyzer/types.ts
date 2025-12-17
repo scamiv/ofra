@@ -39,6 +39,10 @@ export type EconomyPlayerSeries = {
   spentTotal: number[];
   spentOther: number[];
   lostConquest: number[];
+  sentGoldDonations: number[];
+  receivedGoldDonations: number[];
+  sentTroopDonations: number[];
+  receivedTroopDonations: number[];
 };
 
 export type GoldSourceBreakdown = {
@@ -58,6 +62,10 @@ export type EconomyTotals = {
   spentTotal: bigint;
   spentOther: bigint;
   lostConquest: bigint;
+  sentGoldDonations: bigint;
+  receivedGoldDonations: bigint;
+  sentTroopDonations: bigint;
+  receivedTroopDonations: bigint;
 };
 
 export type EconomyReport = {
@@ -73,6 +81,10 @@ export type EconomyReport = {
     earnedConquer: string[];
     earnedOther: string[];
     spentTotal: string[];
+    sentGoldDonations: string[];
+    receivedGoldDonations: string[];
+    sentTroopDonations: string[];
+    receivedTroopDonations: string[];
   };
 };
 
