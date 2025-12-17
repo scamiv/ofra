@@ -117,6 +117,11 @@ declare const d3: any;
 const report: ReplayPerfReport = JSON.parse(document.getElementById("report-data")!.textContent!);
 const tooltip = document.getElementById("tooltip")!;
 
+// Timeline state
+let timelineStartTurn = 1;
+let timelineEndTurn = report.meta.numTicksSimulated;
+let timelineInitialized = false;
+
 const fmtMs = (n: number) => (Number.isFinite(n) ? n.toFixed(3) : "n/a");
 const fmtInt = (n: number) => (Number.isFinite(n) ? String(Math.round(n)) : "n/a");
 const fmtGold = (n: number) => (Number.isFinite(n) ? String(Math.round(n / 1000)) : "n/a");
@@ -140,6 +145,166 @@ function showTooltip(x: number, y: number, html: string) {
 
 function hideTooltip() {
   tooltip.style.display = "none";
+}
+
+function updateTimelineDisplay() {
+  const display = document.getElementById("timeline-range-display")!;
+  if (timelineStartTurn === 1 && timelineEndTurn === report.meta.numTurns) {
+    display.textContent = "All turns";
+  } else {
+    display.textContent = `Turns ${timelineStartTurn} - ${timelineEndTurn}`;
+  }
+}
+
+function filterSamplesByTimeline(samples: Array<{ turnNumber: number; [key: string]: any }>) {
+  return samples.filter(d => d.turnNumber >= timelineStartTurn && d.turnNumber <= timelineEndTurn);
+}
+
+function filterEconomyDataByTimeline(turns: number[], seriesData: Record<string, Record<string, number[]>>) {
+  const startIdx = turns.findIndex(t => t >= timelineStartTurn);
+  let endIdx = -1;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i] <= timelineEndTurn) {
+      endIdx = i;
+      break;
+    }
+  }
+
+  if (startIdx === -1 || endIdx === -1 || startIdx > endIdx) {
+    return { filteredTurns: [], filteredSeries: {} };
+  }
+
+  const filteredTurns = turns.slice(startIdx, endIdx + 1);
+  const filteredSeries: Record<string, Record<string, number[]>> = {};
+
+  for (const [clientId, series] of Object.entries(seriesData)) {
+    filteredSeries[clientId] = {};
+    for (const [metric, values] of Object.entries(series)) {
+      filteredSeries[clientId][metric] = values.slice(startIdx, endIdx + 1);
+    }
+  }
+
+  return { filteredTurns, filteredSeries };
+}
+
+function calculateFilteredPlayerStats() {
+  const econ = report.economy;
+  if (!econ || !econ.turns || econ.turns.length === 0 || !econ.players || econ.players.length === 0) {
+    return report.players; // Return original data if no economy data
+  }
+
+  const { filteredTurns, filteredSeries } = filterEconomyDataByTimeline(econ.turns, econ.seriesByClientId);
+  const isTimelineFiltered = timelineStartTurn !== 1 || timelineEndTurn !== report.meta.numTicksSimulated;
+
+  if (!isTimelineFiltered) {
+    return report.players; // Return original data if timeline shows full range
+  }
+
+  const labelByClientId = new Map(econ.players.map((p) => [p.clientID, p.displayName]));
+
+  // Create filtered stats for each player
+  return report.players.map((player) => {
+    const clientId = player.clientID;
+    if (!clientId || !filteredSeries[clientId]) {
+      // Return original player data if no series data available
+      return player;
+    }
+
+    const series = filteredSeries[clientId];
+
+    // Calculate sums for the filtered period
+    const sumSeries = (seriesName: string) => {
+      const data = series[seriesName];
+      return data ? data.reduce((sum, val) => sum + val, 0) : 0;
+    };
+
+    // Get final/max values for the filtered period
+    const tilesOwned = series.tilesOwned;
+    const tilesOwnedEnd = tilesOwned ? tilesOwned[tilesOwned.length - 1] : player.tilesOwned;
+    const tilesOwnedMax = tilesOwned ? Math.max(...tilesOwned) : player.tilesOwnedMax;
+
+    // Calculate earned/spent totals for filtered period
+    const goldEarnedTradeTotal = sumSeries("earnedTrade");
+    const goldEarnedTrainTotal = sumSeries("earnedTrain");
+    const goldEarnedConquerTotal = sumSeries("earnedConquer");
+    const goldEarnedOtherTotal = sumSeries("earnedOther");
+    const goldSpentTotal = sumSeries("spentTotal");
+    const goldLostConquestTotal = sumSeries("lostConquest");
+    const goldEarnedTotal = goldEarnedTradeTotal + goldEarnedTrainTotal + goldEarnedConquerTotal + goldEarnedOtherTotal;
+
+    return {
+      ...player,
+      // Update timeline-dependent fields
+      tilesOwned: tilesOwnedEnd,
+      tilesOwnedMax: tilesOwnedMax,
+      goldEarnedTotal: goldEarnedTotal,
+      goldEarnedTradeTotal: goldEarnedTradeTotal,
+      goldEarnedTrainTotal: goldEarnedTrainTotal,
+      goldEarnedConquerTotal: goldEarnedConquerTotal,
+      goldEarnedOtherTotal: goldEarnedOtherTotal,
+      goldSpentTotal: goldSpentTotal,
+      goldLostConquestTotal: goldLostConquestTotal,
+      // Keep other fields as-is since we don't have time-series data for them
+      // (troops, gold, unitsOwned, etc.)
+    };
+  });
+}
+
+function initTimelineControls() {
+  if (timelineInitialized) return;
+  timelineInitialized = true;
+
+  const startInput = document.getElementById("timeline-start") as HTMLInputElement;
+  const endInput = document.getElementById("timeline-end") as HTMLInputElement;
+  const resetButton = document.getElementById("timeline-reset") as HTMLButtonElement;
+
+  if (!startInput || !endInput || !resetButton) return;
+
+  // Set initial values
+  startInput.min = "1";
+  startInput.max = report.meta.numTicksSimulated.toString();
+  startInput.value = timelineStartTurn.toString();
+
+  endInput.min = "1";
+  endInput.max = report.meta.numTicksSimulated.toString();
+  endInput.value = timelineEndTurn.toString();
+
+  updateTimelineDisplay();
+
+  const updateTimeline = () => {
+    const newStart = parseInt(startInput.value);
+    const newEnd = parseInt(endInput.value);
+
+    // Ensure start <= end
+    if (newStart > newEnd) {
+      if (startInput === document.activeElement) {
+        endInput.value = newStart.toString();
+        timelineEndTurn = newStart;
+      } else {
+        startInput.value = newEnd.toString();
+        timelineStartTurn = newEnd;
+      }
+    } else {
+      timelineStartTurn = newStart;
+      timelineEndTurn = newEnd;
+    }
+
+    updateTimelineDisplay();
+    renderAll();
+  };
+
+  const resetTimeline = () => {
+    timelineStartTurn = 1;
+    timelineEndTurn = report.meta.numTicksSimulated;
+    startInput.value = timelineStartTurn.toString();
+    endInput.value = timelineEndTurn.toString();
+    updateTimelineDisplay();
+    renderAll();
+  };
+
+  startInput.addEventListener("input", updateTimeline);
+  endInput.addEventListener("input", updateTimeline);
+  resetButton.addEventListener("click", resetTimeline);
 }
 
 function renderSummary() {
@@ -408,7 +573,17 @@ function renderPlayersTable() {
   if (showBots) allowed.add("BOT");
   if (showNpcs) allowed.add("FAKEHUMAN");
 
-  const filtered = report.players
+  // Use filtered player stats when timeline is active
+  const playersData = calculateFilteredPlayerStats();
+
+  // Update header info to show timeline filtering status
+  const headerInfo = document.getElementById("players-header-info")!;
+  const isTimelineFiltered = timelineStartTurn !== 1 || timelineEndTurn !== report.meta.numTicksSimulated;
+  const baseText = `Economy totals come from per-tick gold deltas (engine stats + balance changes), sampled every <span class="mono">${report.economy.sampleEveryTurns}</span> turns.`;
+  const timelineNote = isTimelineFiltered ? ` <span class="mono" style="color: #fbbf24;">Showing data for turns ${timelineStartTurn}-${timelineEndTurn} only.</span>` : "";
+  headerInfo.innerHTML = baseText + timelineNote;
+
+  const filtered = playersData
     .filter((p) => allowed.has(p.type))
     .filter((p) => {
       if (!query) return true;
@@ -445,7 +620,7 @@ function renderPlayersTable() {
 function renderAll() {
   renderSummary();
   renderDiagnostics();
-  const s = report.samples;
+  const s = filterSamplesByTimeline(report.samples);
   renderLineChart("chart-tick-ms", s.map((d) => ({ x: d.turnNumber, y: d.tickExecutionMs })), {
     color: "#60a5fa",
     tooltipHtml: (d) => "turn <span class='mono'>" + d.x + "</span><br/>tick execution <span class='mono'>" + fmtMs(d.y) + " ms</span>",
@@ -487,13 +662,14 @@ function renderAll() {
 
   const econ = report.economy;
   if (econ && econ.turns && econ.turns.length > 0 && econ.players && econ.players.length > 0) {
+    const { filteredTurns, filteredSeries } = filterEconomyDataByTimeline(econ.turns, econ.seriesByClientId);
     const labelByClientId = new Map(econ.players.map((p) => [p.clientID, p.displayName]));
     const colors = d3.schemeTableau10 || ["#60a5fa", "#fbbf24", "#34d399", "#a78bfa", "#fb7185", "#22c55e", "#f97316", "#e879f9", "#38bdf8", "#facc15"];
     const mkLines = (metric: string, ids: string[]) => (ids || []).map((cid, idx) => ({
       id: cid,
       label: labelByClientId.get(cid) || cid,
       color: colors[idx % colors.length],
-      ys: (econ.seriesByClientId && econ.seriesByClientId[cid] && econ.seriesByClientId[cid][metric]) ? econ.seriesByClientId[cid][metric] : [],
+      ys: (filteredSeries && filteredSeries[cid] && filteredSeries[cid][metric]) ? filteredSeries[cid][metric] : [],
     }));
 
     // Create aggregated lines from detailed gold sources
@@ -505,7 +681,7 @@ function renderAll() {
           color: colors[idx % colors.length],
           ys: [] as number[]
         };
-        for (let turnIdx = 0; turnIdx < econ.turns.length; turnIdx++) {
+        for (let turnIdx = 0; turnIdx < filteredTurns.length; turnIdx++) {
           let total = 0;
           if (econ.goldSourceSeriesByClientId[cid]) {
             const sourceData = econ.goldSourceSeriesByClientId[cid];
@@ -521,24 +697,24 @@ function renderAll() {
       });
     };
 
-    renderMultiLineChart("chart-gold-earned-trade", econ.turns, aggregateGoldSources(
+    renderMultiLineChart("chart-gold-earned-trade", filteredTurns, aggregateGoldSources(
       (func) => func.includes('TradeShip'), econ.top.earnedTrade), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-gold-earned-train", econ.turns, aggregateGoldSources(
+    renderMultiLineChart("chart-gold-earned-train", filteredTurns, aggregateGoldSources(
       (func) => func.includes('StopHandler') || func.includes('TrainStation'), econ.top.earnedTrain), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-gold-earned-conquer", econ.turns, aggregateGoldSources(
+    renderMultiLineChart("chart-gold-earned-conquer", filteredTurns, aggregateGoldSources(
       (func) => func.includes('conquer'), econ.top.earnedConquer), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-gold-earned-other", econ.turns, aggregateGoldSources(
+    renderMultiLineChart("chart-gold-earned-other", filteredTurns, aggregateGoldSources(
       (func) => !func.includes('TradeShip') && !func.includes('StopHandler') && !func.includes('TrainStation') && !func.includes('conquer') && !func.includes('Troop') && !func.includes('ConstructionExecution') && !func.includes('donateGold'), econ.top.earnedOther), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-gold-spent-total", econ.turns, mkLines("spentTotal", econ.top.spentTotal), { valueFormatter: fmtGold });
+    renderMultiLineChart("chart-gold-spent-total", filteredTurns, mkLines("spentTotal", econ.top.spentTotal), { valueFormatter: fmtGold });
 
-    renderMultiLineChart("chart-gold-donations-sent", econ.turns, mkLines("sentGoldDonations", econ.top.sentGoldDonations), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-gold-donations-received", econ.turns, mkLines("receivedGoldDonations", econ.top.receivedGoldDonations), { valueFormatter: fmtGold });
-    renderMultiLineChart("chart-troop-donations-sent", econ.turns, mkLines("sentTroopDonations", econ.top.sentTroopDonations), {});
-    renderMultiLineChart("chart-troop-donations-received", econ.turns, mkLines("receivedTroopDonations", econ.top.receivedTroopDonations), {});
-    renderMultiLineChart("chart-tiles-owned", econ.turns, mkLines("tilesOwned", Object.keys(econ.seriesByClientId)), {});
+    renderMultiLineChart("chart-gold-donations-sent", filteredTurns, mkLines("sentGoldDonations", econ.top.sentGoldDonations), { valueFormatter: fmtGold });
+    renderMultiLineChart("chart-gold-donations-received", filteredTurns, mkLines("receivedGoldDonations", econ.top.receivedGoldDonations), { valueFormatter: fmtGold });
+    renderMultiLineChart("chart-troop-donations-sent", filteredTurns, mkLines("sentTroopDonations", econ.top.sentTroopDonations), {});
+    renderMultiLineChart("chart-troop-donations-received", filteredTurns, mkLines("receivedTroopDonations", econ.top.receivedTroopDonations), {});
+    renderMultiLineChart("chart-tiles-owned", filteredTurns, mkLines("tilesOwned", Object.keys(filteredSeries)), {});
 
     // Render gold sources by function (raw function names for maximum detail)
-    if (econ.goldSourceSeriesByClientId) {
+    if (econ.goldSourceSeriesByClientId && filteredTurns.length > 0) {
       const allFunctions = new Set<string>();
       for (const clientId of Object.keys(econ.goldSourceSeriesByClientId)) {
         for (const func of Object.keys(econ.goldSourceSeriesByClientId[clientId])) {
@@ -553,7 +729,7 @@ function renderAll() {
         id: func,
         label: func,
         color: colors[idx % colors.length],
-        ys: econ.turns.map((_, turnIdx) => {
+        ys: filteredTurns.map((_, turnIdx) => {
           let total = 0;
           for (const clientId of Object.keys(econ.goldSourceSeriesByClientId)) {
             const series = econ.goldSourceSeriesByClientId[clientId][func];
@@ -565,11 +741,11 @@ function renderAll() {
         }),
       }));
 
-      renderMultiLineChart("chart-gold-sources", econ.turns, sourceLines, { valueFormatter: fmtGold });
+      renderMultiLineChart("chart-gold-sources", filteredTurns, sourceLines, { valueFormatter: fmtGold });
     }
 
     // Render troop sources by function
-    if (econ.troopSourceSeriesByClientId) {
+    if (econ.troopSourceSeriesByClientId && filteredTurns.length > 0) {
       const allTroopFunctions = new Set<string>();
       for (const clientId of Object.keys(econ.troopSourceSeriesByClientId)) {
         for (const func of Object.keys(econ.troopSourceSeriesByClientId[clientId])) {
@@ -581,7 +757,7 @@ function renderAll() {
         id: func,
         label: func,
         color: colors[idx % colors.length],
-        ys: econ.turns.map((_, turnIdx) => {
+        ys: filteredTurns.map((_, turnIdx) => {
           let total = 0;
           for (const clientId of Object.keys(econ.troopSourceSeriesByClientId)) {
             const series = econ.troopSourceSeriesByClientId[clientId][func];
@@ -593,7 +769,7 @@ function renderAll() {
         }),
       }));
 
-      renderMultiLineChart("chart-troop-sources", econ.turns, troopSourceLines, {});
+      renderMultiLineChart("chart-troop-sources", filteredTurns, troopSourceLines, {});
     }
   }
 
@@ -614,4 +790,5 @@ function initControls() {
 
 renderAll();
 initControls();
+initTimelineControls();
 window.addEventListener("resize", () => renderAll(), { passive: true });

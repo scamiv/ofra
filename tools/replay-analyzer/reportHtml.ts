@@ -45,6 +45,9 @@ export function reportHtml(d3Source: string, chartJsSource: string, report: Repl
       .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 0 0 10px; font-size: 12px; }
       .controls label { display: inline-flex; gap: 6px; align-items: center; }
       .controls input[type="text"] { background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.10); color: #e5e7eb; border-radius: 8px; padding: 6px 8px; min-width: 220px; }
+      input[type="range"] { background: transparent; cursor: pointer; }
+      input[type="range"]::-webkit-slider-thumb { appearance: none; background: #60a5fa; border-radius: 50%; width: 16px; height: 16px; cursor: pointer; }
+      input[type="range"]::-moz-range-thumb { background: #60a5fa; border-radius: 50%; width: 16px; height: 16px; cursor: pointer; border: none; }
     </style>
   </head>
   <body>
@@ -67,6 +70,28 @@ export function reportHtml(d3Source: string, chartJsSource: string, report: Repl
       <div class="card" style="margin-top: 14px;">
         <h2>Diagnostics</h2>
         <div id="diagnostics" class="muted"></div>
+      </div>
+
+      <div class="card" style="margin-top: 14px;">
+        <h2>Timeline Filter</h2>
+        <div style="margin-bottom: 12px;">
+          <div style="margin-bottom: 8px; font-size: 12px; opacity: 0.8;">
+            Current range: <span id="timeline-range-display" class="mono">All turns</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center;">
+            <div>
+              <label style="display: block; font-size: 11px; margin-bottom: 4px; opacity: 0.8;">Start Turn</label>
+              <input type="range" id="timeline-start" min="1" max="1000" value="1" style="width: 100%;" />
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; margin-bottom: 4px; opacity: 0.8;">End Turn</label>
+              <input type="range" id="timeline-end" min="1" max="1000" value="1000" style="width: 100%;" />
+            </div>
+            <div>
+              <button id="timeline-reset" style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.10); color: #e5e7eb; border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; width: 100%;">Reset</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="grid" style="margin-top: 14px;">
@@ -147,7 +172,7 @@ export function reportHtml(d3Source: string, chartJsSource: string, report: Repl
 
       <div class="card" style="margin-top: 14px;">
         <h2>Players</h2>
-        <div class="muted" style="font-size: 12px; margin: 0 0 10px;">
+        <div id="players-header-info" class="muted" style="font-size: 12px; margin: 0 0 10px;">
           Economy totals come from per-tick gold deltas (engine stats + balance changes), sampled every <span class="mono">${report.economy.sampleEveryTurns}</span> turns.
         </div>
         <div class="controls muted">
