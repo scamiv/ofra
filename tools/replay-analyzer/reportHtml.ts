@@ -101,6 +101,10 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           <div id="chart-gold-earned-conquer" class="chart"></div>
         </div>
         <div class="card">
+          <h2>Total gold earned by source (cumulative)</h2>
+          <div id="chart-gold-sources" class="chart"></div>
+        </div>
+        <div class="card">
           <h2>Gold earned: other (residual) (cumulative)</h2>
           <div id="chart-gold-earned-other" class="chart"></div>
         </div>
@@ -302,6 +306,10 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
 
       function renderMultiLineChart(targetId, xValues, lines, opts) {
         const target = document.getElementById(targetId);
+        if (!target) {
+          console.warn("Chart target element not found: " + targetId);
+          return;
+        }
         target.innerHTML = "";
         if (!xValues || xValues.length === 0 || !lines || lines.length === 0) {
           target.innerHTML = "<div class='muted' style='font-size:12px;'>no data</div>";
@@ -518,7 +526,7 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
             id: cid,
             label: labelByClientId.get(cid) || cid,
             color: colors[idx % colors.length],
-            ys: (econ.seriesByClientId && econ.seriesByClientId[cid] ? econ.seriesByClientId[cid][metric] : []),
+            ys: (econ.seriesByClientId && econ.seriesByClientId[cid] && econ.seriesByClientId[cid][metric]) ? econ.seriesByClientId[cid][metric] : [],
           }));
 
           renderMultiLineChart("chart-gold-earned-trade", econ.turns, mkLines("earnedTrade", econ.top.earnedTrade), {});
@@ -526,6 +534,34 @@ export function reportHtml(d3Source: string, report: ReplayPerfReport): string {
           renderMultiLineChart("chart-gold-earned-conquer", econ.turns, mkLines("earnedConquer", econ.top.earnedConquer), {});
           renderMultiLineChart("chart-gold-earned-other", econ.turns, mkLines("earnedOther", econ.top.earnedOther), {});
           renderMultiLineChart("chart-gold-spent-total", econ.turns, mkLines("spentTotal", econ.top.spentTotal), {});
+
+          // Render gold sources by function
+          if (econ.goldSourceSeriesByClientId) {
+            const allFunctions = new Set();
+            for (const clientId of Object.keys(econ.goldSourceSeriesByClientId)) {
+              for (const func of Object.keys(econ.goldSourceSeriesByClientId[clientId])) {
+                allFunctions.add(func);
+              }
+            }
+
+            const sourceLines = Array.from(allFunctions).map((func, idx) => ({
+              id: func,
+              label: func,
+              color: colors[idx % colors.length],
+              ys: econ.turns.map((_, turnIdx) => {
+                let total = 0;
+                for (const clientId of Object.keys(econ.goldSourceSeriesByClientId)) {
+                  const series = econ.goldSourceSeriesByClientId[clientId][func];
+                  if (series && series[turnIdx] !== undefined) {
+                    total += series[turnIdx];
+                  }
+                }
+                return total;
+              }),
+            }));
+
+            renderMultiLineChart("chart-gold-sources", econ.turns, sourceLines, {});
+          }
         }
 
         renderPlayersTable();

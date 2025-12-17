@@ -41,6 +41,14 @@ export type EconomyPlayerSeries = {
   lostConquest: number[];
 };
 
+export type GoldSourceBreakdown = {
+  [callerFunction: string]: bigint;
+};
+
+export type GoldSourceSeries = {
+  [callerFunction: string]: number[];
+};
+
 export type EconomyTotals = {
   earnedTotal: bigint;
   earnedTrade: bigint;
@@ -57,6 +65,8 @@ export type EconomyReport = {
   turns: number[];
   players: { clientID: string; displayName: string }[];
   seriesByClientId: Record<string, EconomyPlayerSeries>;
+  goldSourcesByClientId: Record<string, GoldSourceBreakdown>;
+  goldSourceSeriesByClientId: Record<string, GoldSourceSeries>;
   top: {
     earnedTrade: string[];
     earnedTrain: string[];
