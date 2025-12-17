@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { execSync } from "node:child_process";
 import inspector from "node:inspector";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -275,7 +276,15 @@ const defaultOutPath = path.join(
   `${replayBase}.${timestamp}.report.html`,
 );
 const finalOutPath = outPath ? path.resolve(process.cwd(), outPath) : defaultOutPath;
-await fs.writeFile(finalOutPath, reportHtml(d3Source, report), "utf8");
+
+// Build chartRenderer.js
+execSync("npm run build:charts", { stdio: "inherit", cwd: repoRoot });
+
+// Read the compiled chartRenderer.js
+const chartRendererSrc = path.join(repoRoot, "tools", "dist", "replay-analyzer", "chartRenderer.js");
+const chartJsSource = await fs.readFile(chartRendererSrc, "utf8");
+
+await fs.writeFile(finalOutPath, reportHtml(d3Source, chartJsSource, report), "utf8");
 
 console.log("");
 console.log(`done: simulated ${loaded.turnsToRun.length} turns in ${Math.round(elapsedMs)}ms`);

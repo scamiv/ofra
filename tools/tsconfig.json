@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "module": "ESNext",
+    "rootDir": ".",
+    "moduleResolution": "node",
+    "sourceMap": false,
+    "allowSyntheticDefaultImports": true,
+    "allowUnusedLabels": false,
+    "alwaysStrict": true,
+    "esModuleInterop": true,
+    "experimentalDecorators": true,
+    "resolveJsonModule": true,
+    "strictNullChecks": true,
+    "useDefineForClassFields": false,
+    "strictPropertyInitialization": false,
+    "declaration": false,
+    "outDir": "dist",
+    "skipLibCheck": true
+  },
+  "include": [
+    "replay-analyzer/chartRenderer.ts"
+  ],
+  "exclude": ["node_modules"]
+}

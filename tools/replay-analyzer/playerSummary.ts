@@ -28,54 +28,54 @@ export function summarizePlayers(
       tilesOwned: p.numTilesOwned(),
       tilesOwnedMax: maxTilesBySmallID.get(p.smallID()) ?? p.numTilesOwned(),
       troops: p.troops(),
-      gold: p.gold().toString(),
+      gold: (Number(p.gold()) / 1000).toFixed(1),
       goldEarnedTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.earnedTotal.toString() : null;
+        return totals ? (Number(totals.earnedTotal) / 1000).toFixed(1) : null;
       })(),
       goldSpentTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.spentTotal.toString() : null;
+        return totals ? (Number(totals.spentTotal) / 1000).toFixed(1) : null;
       })(),
       goldLostConquestTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.lostConquest.toString() : null;
+        return totals ? (Number(totals.lostConquest) / 1000).toFixed(1) : null;
       })(),
       goldEarnedTradeTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.earnedTrade.toString() : null;
+        return totals ? (Number(totals.earnedTrade) / 1000).toFixed(1) : null;
       })(),
       goldEarnedTrainTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.earnedTrain.toString() : null;
+        return totals ? (Number(totals.earnedTrain) / 1000).toFixed(1) : null;
       })(),
       goldEarnedConquerTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.earnedConquer.toString() : null;
+        return totals ? (Number(totals.earnedConquer) / 1000).toFixed(1) : null;
       })(),
       goldEarnedOtherTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const totals = economyTotalsByClientId.get(cid);
-        return totals ? totals.earnedOther.toString() : null;
+        return totals ? (Number(totals.earnedOther) / 1000).toFixed(1) : null;
       })(),
       goldEarnedReplayTotal: (() => {
         const cid = p.clientID();
         if (!cid) return null;
         const earned = goldEarnedReplayByClientId.get(cid);
-        return earned !== undefined ? earned.toString() : null;
+        return earned !== undefined ? (Number(earned) / 1000).toFixed(1) : null;
       })(),
       unitsOwned,
     };
